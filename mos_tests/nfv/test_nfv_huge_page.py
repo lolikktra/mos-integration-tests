@@ -76,3 +76,51 @@ class TestHugePages(TestBaseNFV):
                              free_pages=free_pages[vm_hosts.count(host)])
         self.check_instance_page_size(os_conn, vm_0_new, size=2048)
         network_checks.check_vm_connectivity(env, os_conn)
+
+    @pytest.mark.parametrize('nfv_flavor',
+                             [[[['m1.small.hpgs', 512, 1, 1],
+                               [{'hw:mem_page_size': 2048}, ]],
+                              [['m1.small.hpgs-1', 2000, 20, 2],
+                               [{'hw:mem_page_size': 1048576}, ]]]],
+                             indirect=['nfv_flavor'])
+    @pytest.mark.check_env_('has_2_or_more_computes')
+    @pytest.mark.testrail_id('838313')
+    def test_huge_pages_distribution(
+            self, env, os_conn, networks, keypair, nfv_flavor,
+            security_group, aggregate):
+        """This test checks huge pages' distribution with flavor for 2M
+            and 1G Huge Pages
+            Steps:
+            1. Create flavors m1.small.hpgs and m1.small.hpgs-1
+            2. Create net01 with subnet, net02 with subnet and  router01 with
+            interfaces to both nets
+            3. Launch instance vm1 on compute-1 in net01 with m1.small.hpgs-1
+            4. Launch instance vm2 on compute-2 in net02 with m1.small.hpgs
+            5. Launch instance vm3 on compute-1 in net02 with m1.small.hpgs
+            6. Check vms connectivity
+        """
+        hosts = aggregate.hosts
+
+        vm_1 = os_conn.create_server(
+            name='vm1', flavor=nfv_flavor[1].id, key_name=keypair.name,
+            nics=[{'net-id': networks[0]}],
+            availability_zone='nova:{}'.format(hosts[0]),
+            security_groups=[security_group.id])
+        vm_2 = os_conn.create_server(
+            name='vm2', flavor=nfv_flavor[0].id, key_name=keypair.name,
+            nics=[{'net-id': networks[1]}],
+            availability_zone='nova:{}'.format(hosts[1]),
+            security_groups=[security_group.id])
+        vm_3 = os_conn.create_server(
+            name='vm3', flavor=nfv_flavor[0].id, key_name=keypair.name,
+            nics=[{'net-id': networks[1]}],
+            availability_zone='nova:{}'.format(hosts[0]),
+            security_groups=[security_group.id])
+
+        self.check_pages(os_conn, hosts[0], total_pages=1024, free_pages=512)
+        self.check_pages(os_conn, hosts[1], total_pages=1024, free_pages=512)
+
+        self.check_instance_page_size(os_conn, vm_1, size=1048576)
+        self.check_instance_page_size(os_conn, vm_2, size=2048)
+        self.check_instance_page_size(os_conn, vm_3, size=2048)
+        network_checks.check_vm_connectivity(env, os_conn)
